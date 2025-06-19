@@ -375,7 +375,7 @@
             // Wait for formation before showing first message
             setTimeout(() => {
                 currentPhase = 5; // Start pulsing
-                showMessage("Oi Gabriel!", 4000, '#fff', shapeBaseYPosition + 70); 
+                showMessage("Oi Lavínia!", 4000, '#fff', shapeBaseYPosition + 70); 
                 setTimeout(startPhase5, 5000); 
             }, 3000); 
         }
@@ -389,7 +389,7 @@
         }
 
         function startPhase6() {
-            showMessage("Meu BomBom", 4000, '##fff', shapeBaseYPosition + 70); 
+            showMessage("Minha Princesa", 4000, '##fff', shapeBaseYPosition + 70); 
             currentPhase = 6;
             dots.forEach(dot => {
                 const angle = Math.random() * Math.PI * 2; 
@@ -479,7 +479,7 @@
                  Tone.Transport.stop();
             }
             setTimeout(() => {
-                showMessage("Feito com carinho para você.", 4000, '#FF69B4', canvas.height / 2);
+                showMessage("Com todo meu carinho, de Gabriel para Lavínia.", 4000, '#FF69B4', canvas.height / 2);
                 restartButton.style.opacity = '1';
                 restartButton.style.pointerEvents = 'auto';
             }, 2500);
