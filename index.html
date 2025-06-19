@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Minha Surpresa Especial</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            overflow: hidden;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            background-color: #000;
+        }
+
+        canvas {
+            display: block;
+            background-color: #000;
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+            opacity: 1;
+            transition: opacity 2s ease-out;
+        }
+
+        .message-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 2rem;
+            font-weight: bold;
+            text-align: center;
+            opacity: 0;
+            transition: opacity 1s ease-in-out, transform 1s ease-in-out, top 1s ease-in-out;
+            z-index: 4; /* Above canvas and buttons */
+            pointer-events: none;
+            background-color: rgba(0, 0, 0, 0.4);
+            padding: 0.8rem 1.5rem;
+            border-radius: 0.75rem;
+            backdrop-filter: blur(5px);
+            -webkit-backdrop-filter: blur(5px);
+        }
+
+        .action-button {
+            z-index: 3;
+            transition: opacity 0.5s ease-in-out, transform 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+            background-color: #272226;
+            border: 2px solid #FF0000;
+            font-size: 1.2rem;
+            padding: 0.6rem 1.5rem;
+            cursor: pointer;
+            color: white;
+        }
+        .action-button:hover {
+            transform: translateY(-3px) scale(1.02);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+            background-color: #999;
+        }
+        
+        #startButton {
+             animation: pulse 1.5s infinite alternate;
+        }
+        
+        #restartButton {
+            opacity: 0;
+            pointer-events: none;
+            position: absolute;
+            bottom: 5vh;
+        }
+
+        @keyframes pulse {
+            from { transform: scale(1); border-color: #FF0000; }
+            to { transform: scale(1.05); border-color: #FF69B4; }
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="dotCanvas"></canvas>
+    <button id="startButton" class="action-button rounded-full">
+        Começar Surpresa
+    </button>
+    <button id="restartButton" class="action-button rounded-full">
+        Recomeçar
+    </button>
+    <div id="mainMessage" class="message-overlay"></div>
+    
+    <script>
+        const canvas = document.getElementById('dotCanvas');
+        let ctx = null;
+
+        if (canvas) {
+            ctx = canvas.getContext('2d');
+            if (!ctx) console.error("ERRO GRAVE: Não foi possível obter o contexto 2D do canvas.");
+            else console.log("SUCESSO: Contexto 2D do canvas obtido.");
+        } else {
+            console.error("ERRO GRAVE: O elemento canvas com ID 'dotCanvas' não foi encontrado no DOM.");
+        }
+        
+        const startButton = document.getElementById('startButton');
+        const restartButton = document.getElementById('restartButton');
+        const mainMessage = document.getElementById('mainMessage');
+
+        let dots = [];
+        const NUM_DOTS = 1200;
+        const DOT_RADIUS = 3.0; 
+        let animationFrameId;
+        let mouseX = -1000, mouseY = -1000;
+        let currentPhase = 1;
+        let shapeBaseYPosition = null; 
+
+        // --- Audio Setup ---
+        let synth;
+        let musicStarted = false;
+
+        function setupAudio() {
+             if (typeof Tone === 'undefined') {
+                console.error("Tone.js não carregou.");
+                return;
+            }
+            synth = new Tone.PolySynth(Tone.Synth, {
+                oscillator: { type: "fatsine" },
+                envelope: { attack: 0.01, decay: 0.1, sustain: 0.2, release: 0.8 }
+            }).toDestination();
+            
+            const melody = new Tone.Sequence((time, note) => {
+                synth.triggerAttackRelease(note, "8n", time);
+            }, ["C4", ["E4", "G4"], "A4", "G4", "E4", ["C4", "G3"]], "4n");
+            
+            melody.start(0);
+            Tone.Transport.bpm.value = 90;
+        }
+
+        // --- Utility Functions ---
+
+        function resizeCanvas() {
+            if (canvas && ctx) {
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+                if (currentPhase === 7) {
+                    startPhase7(true); // Reinicia a fase 7 sem transições
+                } else if (currentPhase === 1 && dots.length > 0) {
+                    dots.forEach(dot => {
+                        dot.x = Math.random() * canvas.width;
+                        dot.y = Math.random() * canvas.height;
+                        dot.originalX = dot.x;
+                        dot.originalY = dot.y;
+                    });
+                } else if ((currentPhase >= 4 && currentPhase <= 5) && dots.length > 0) {
+                    const roseData = generateRosePoints();
+                    const rosePoints = roseData.points;
+                    shapeBaseYPosition = roseData.base_y;
+                    dots.forEach((dot, index) => {
+                        dot.targetX = rosePoints[index % rosePoints.length].x;
+                        dot.targetY = rosePoints[index % rosePoints.length].y;
+                    });
+                }
+            }
+        }
+        window.addEventListener('resize', resizeCanvas);
+        
+
+        class Dot {
+            constructor() {
+                this.x = Math.random() * canvas.width;
+                this.y = Math.random() * canvas.height;
+                this.vx = (Math.random() - 0.5) * 1;
+                this.vy = (Math.random() - 0.5) * 1;
+                this.color = 'red'; 
+                this.targetX = this.x; 
+                this.targetY = this.y; 
+                this.originalX = this.x;
+                this.originalY = this.y;
+                this.alpha = 1;
+            }
+
+            draw() {
+                if (!ctx) return;
+                ctx.save();
+                ctx.globalAlpha = this.alpha;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, DOT_RADIUS, 0, Math.PI * 2);
+                ctx.fillStyle = this.color;
+                ctx.shadowBlur = 0; 
+                ctx.fill();
+                ctx.restore();
+            }
+
+            update(centerX, centerY) {
+                switch(currentPhase) {
+                    case 1: this.updatePhase1(); break;
+                    case 3: this.updatePhase3(); break;
+                    case 4: this.updateFormation(0.1); break;
+                    case 5: this.updatePulsing(centerX, centerY); break;
+                    case 6: this.updateExplosion(); break;
+                }
+            }
+
+            updatePhase1() {
+                this.x += this.vx;
+                this.y += this.vy;
+                if (this.x < 0 || this.x > canvas.width) this.vx *= -1;
+                if (this.y < 0 || this.y > canvas.height) this.vy *= -1;
+            }
+
+            updatePhase3() {
+                const dx = this.x - mouseX;
+                const dy = this.y - mouseY;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                const repelRadius = 150;
+                const repelForce = 8;
+                if (distance < repelRadius && distance > 0) {
+                    const angle = Math.atan2(dy, dx);
+                    const forceMagnitude = repelForce * (1 - distance / repelRadius);
+                    this.x += Math.cos(angle) * forceMagnitude;
+                    this.y += Math.sin(angle) * forceMagnitude;
+                } else {
+                    const easeBackFactor = 0.02;
+                    this.x += (this.originalX - this.x) * easeBackFactor;
+                    this.y += (this.originalY - this.y) * easeBackFactor;
+                }
+            }
+            
+            updateFormation(easeFactor) {
+                this.x += (this.targetX - this.x) * easeFactor;
+                this.y += (this.targetY - this.y) * easeFactor;
+            }
+
+            updatePulsing(centerX, centerY) {
+                const pulseFactor = 1 + Math.sin(Date.now() * 0.003) * 0.04;
+                const dx = this.targetX - centerX;
+                const dy = this.targetY - centerY;
+                const pulsedX = centerX + dx * pulseFactor;
+                const pulsedY = centerY + dy * pulseFactor;
+                this.x += (pulsedX - this.x) * 0.1;
+                this.y += (pulsedY - this.y) * 0.1;
+            }
+
+            updateExplosion() {
+                this.x += this.vx;
+                this.y += this.vy;
+                this.vy += 0.1;
+                this.alpha = Math.max(0, 1 - (this.y / canvas.height));
+            }
+        }
+
+        function initDots() {
+            dots = [];
+            for (let i = 0; i < NUM_DOTS; i++) {
+                dots.push(new Dot());
+            }
+        }
+
+        function animate() {
+            if (!ctx || currentPhase >= 7) return;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+
+            dots.forEach(dot => {
+                dot.update(centerX, centerY);
+                dot.draw();
+            });
+            
+            animationFrameId = requestAnimationFrame(animate);
+        }
+
+        function generateRosePoints() {
+            const rosePoints = [];
+            const scale = Math.min(canvas.width, canvas.height) * 0.3;
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+            const n = 5, d = 2, k = n / d;
+            let lowestY = 0;
+            for (let i = 0; i < NUM_DOTS; i++) {
+                const t = (i / NUM_DOTS) * (2 * d * Math.PI);
+                const r = Math.cos(k * t);
+                const x = r * Math.cos(t);
+                const y = r * Math.sin(t);
+                const finalX = centerX + x * scale;
+                const finalY = centerY - y * scale; 
+                if (finalY > lowestY) lowestY = finalY;
+                rosePoints.push({ x: finalX, y: finalY });
+            }
+            return { points: rosePoints, base_y: lowestY };
+        }
+
+        function playMessageSequence(messages, onComplete) {
+            let i = 0;
+            function showNext() {
+                if (i < messages.length) {
+                    const msg = messages[i++];
+                    showMessage(msg.text, msg.duration, msg.color, msg.yPos);
+                    setTimeout(showNext, msg.duration + 1000); 
+                } else if (onComplete) onComplete();
+            }
+            showNext(); 
+        }
+
+        function showMessage(text, duration, color = 'white', targetY = null) {
+            mainMessage.innerText = text;
+            mainMessage.style.color = color;
+            mainMessage.style.opacity = '1';
+            mainMessage.style.transform = 'translate(-50%, -50%) scale(1)';
+            mainMessage.style.top = targetY !== null ? `${targetY}px` : '50%';
+            setTimeout(() => {
+                mainMessage.style.opacity = '0';
+                mainMessage.style.transform = 'translate(-50%, -50%) scale(0.9)';
+            }, duration);
+        }
+
+        // --- Flow of Animation Phases ---
+
+        function startPhase1() {
+            currentPhase = 1;
+            initDots();
+            animate();
+            startButton.style.opacity = '1';
+            startButton.style.pointerEvents = 'auto';
+            restartButton.style.opacity = '0';
+            restartButton.style.pointerEvents = 'none';
+            if (canvas) canvas.style.opacity = '1';
+        }
+
+        startButton.addEventListener('click', async () => {
+            if (currentPhase === 1) {
+                if(!musicStarted && typeof Tone !== 'undefined'){
+                    await Tone.start();
+                    setupAudio();
+                    Tone.Transport.start();
+                    musicStarted = true;
+                    console.log("Música iniciada!");
+                }
+                
+                currentPhase = 3;
+                startButton.style.opacity = '0';
+                startButton.style.pointerEvents = 'none';
+                document.addEventListener('mousemove', e => { mouseX = e.clientX; mouseY = e.clientY; });
+                setTimeout(() => showMessage("Apague a Luz", 3000), 1000); 
+                setTimeout(() => {
+                    showMessage("Aumente o Volume", 3000); 
+                    setTimeout(startPhase4, 4000); 
+                }, 4500); 
+            }
+        });
+
+        restartButton.addEventListener('click', () => location.reload());
+
+        function startPhase4() {
+           currentPhase = 4;
+            if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+            const roseData = generateRosePoints();
+            const rosePoints = roseData.points;
+            shapeBaseYPosition = roseData.base_y;
+            dots.forEach((dot, index) => {
+                dot.targetX = rosePoints[index % rosePoints.length].x;
+                dot.targetY = rosePoints[index % rosePoints.length].y;
+                dot.color = '#FF0000'; 
+                dot.alpha = 1; 
+            });
+            // Wait for formation before showing first message
+            setTimeout(() => {
+                currentPhase = 5; // Start pulsing
+                showMessage("Oi Gabriel!", 4000, '#fff', shapeBaseYPosition + 70); 
+                setTimeout(startPhase5, 5000); 
+            }, 3000); 
+        }
+
+        function startPhase5() {
+            const phase5Messages = [
+                { text: "Esse é meu jeito de dizer....", duration: 4000, color: '##fff', yPos: shapeBaseYPosition + 70 }, 
+                { text: "TE AMO!", duration: 4500, color: '##fff', yPos: shapeBaseYPosition + 70 } 
+            ];
+            playMessageSequence(phase5Messages, startPhase6); 
+        }
+
+        function startPhase6() {
+            showMessage("Meu BomBom", 4000, '##fff', shapeBaseYPosition + 70); 
+            currentPhase = 6;
+            dots.forEach(dot => {
+                const angle = Math.random() * Math.PI * 2; 
+                const speed = Math.random() * 7 + 3; 
+                dot.vx = Math.cos(angle) * speed;
+                dot.vy = Math.sin(angle) * speed;
+            });
+            setTimeout(() => {
+                if(canvas) canvas.style.opacity = '0';
+            }, 4500); 
+            setTimeout(startPhase7, 7000); 
+        }
+
+        // --- Improved Digital Rain ---
+        let rainAnimationId;
+        let drops;
+        const fontSize = 12;
+        let columns;
+        let lastRainUpdateTime = 0;
+        const rainUpdateInterval = 50; // ms. Higher value = slower. This value slows down the rain.
+
+        function startPhase7(isResize = false) {
+            cancelAnimationFrame(animationFrameId);
+            cancelAnimationFrame(rainAnimationId);
+            currentPhase = 7;
+            if (!isResize) {
+                canvas.style.transition = 'opacity 1.5s ease-in';
+                canvas.style.opacity = '1';
+            }
+            columns = Math.floor(canvas.width / fontSize);
+            drops = [];
+            for(let i = 0; i < columns; i++) {
+                drops[i] = {
+                    y: 1 + Math.floor(Math.random() * (canvas.height / fontSize)),
+                    trail: []
+                };
+            }
+            lastRainUpdateTime = 0; // Reset timer for the loop
+            drawDigitalRain(0); // Start the loop, passing initial timestamp
+            // Transition to the end
+            setTimeout(startPhase8, 20000); 
+        }
+
+        function drawDigitalRain(timestamp) {
+            if (currentPhase !== 7 || !ctx) return;
+            rainAnimationId = requestAnimationFrame(drawDigitalRain);
+
+            const elapsed = timestamp - lastRainUpdateTime;
+
+            // Only draw if enough time has passed
+            if (elapsed < rainUpdateInterval) {
+                return;
+            }
+            lastRainUpdateTime = timestamp; // Update the last update time
+
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.font = `${fontSize}px monospace`;
+            const text = "TeAmo!";
+            for(let i = 0; i < drops.length; i++) {
+                const x = i * fontSize;
+                let y = drops[i].y * fontSize;
+                // Draw leader
+                ctx.fillStyle = '#FFC0CB'; // Pink leader
+                ctx.fillText(text, x, y);
+                // Draw trail
+                for(let j = 0; j < 5; j++) {
+                    if (y - (j+1)*fontSize < 0) break;
+                    ctx.fillStyle = `rgba(255, 69, 0, ${1 - (j+1)*0.2})`;
+                    ctx.fillText(text, x, y - (j+1)*fontSize);
+                }
+                if(y > canvas.height && Math.random() > 0.98) {
+                    drops[i].y = 0;
+                }
+                drops[i].y++;
+            }
+        }
+
+        function startPhase8() {
+            currentPhase = 8;
+            cancelAnimationFrame(rainAnimationId);
+            if(canvas) {
+                canvas.style.transition = 'opacity 2s ease-out';
+                canvas.style.opacity = '0';
+            }
+            if (Tone.Transport.state === "started") {
+                 Tone.Transport.stop();
+            }
+            setTimeout(() => {
+                showMessage("Feito com carinho para você.", 4000, '#FF69B4', canvas.height / 2);
+                restartButton.style.opacity = '1';
+                restartButton.style.pointerEvents = 'auto';
+            }, 2500);
+        }
+
+        window.onload = () => {
+            resizeCanvas();
+            startPhase1();
+        };
+
+    </script>
+</body>
+</html>
